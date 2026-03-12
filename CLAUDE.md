@@ -23,7 +23,8 @@ python -m pytest test_dupehunter.py::test_detects_duplicate_group -v
 # Run the tool
 python dupehunter.py --path /some/folder -f jpg -f png          # scan only
 python dupehunter.py --path /some/folder -f pdf --delete        # send dupes to OS trash
-python dupehunter.py --path /some/folder -f mp4 --archive /tmp/dupes  # move dupes to folder
+python dupehunter.py --path /some/folder -f mp4 --archive /tmp/dupes  # archive dupes to explicit folder
+python dupehunter.py --path /some/folder -f mp4 --archive             # archive dupes to auto-generated folder inside --path
 ```
 
 ## Architecture
@@ -38,14 +39,16 @@ main()
  ├─ find_duplicates(files, ...)      → {sha256_digest: [path, path, ...]}
  │    ├─ size pre-filter             (skip files with a unique size — no hashing needed)
  │    └─ hash_file(path)             → hex digest or None on read error
- └─ act_on_duplicates(groups, args)  → trash or move all but sorted(paths)[0]
+ └─ act_on_duplicates(groups, args, archive_root)  → trash or archive all but sorted(paths)[0]
+      └─ archive: per-group numbered subfolder (001/, 002/, ...) with keeper copy + dupe moves
 ```
 
 ### Key design decisions
 
 - **Size pre-filter before hashing** — the primary perf optimization; files with a unique size are guaranteed unique and never hashed.
 - **Keeper selection** — within each duplicate group, `sorted(paths)[0]` (lexicographic) is always kept; the rest are acted on. This is deterministic and auditable.
-- **Archive name collision** — if a destination filename already exists, the hash prefix (`digest[:8]`) is appended to the stem before moving.
+- **Archive subfolder structure** — each duplicate group gets a numbered subfolder (`001/`, `002/`, ...) inside the archive root. The keeper is *copied* in as `keeper_<name>` (original stays in place); duplicates are *moved* in as-is. No collision handling needed — each group has its own folder.
+- **Auto archive path** — `--archive` with no value (`nargs='?'`, `const='AUTO'`) resolves in `main()` to `<root>/dupehunter-archive-YYYYMMDD-HHMMSS`. The resolved `Path` is passed as `archive_root` to `act_on_duplicates`.
 - **`draw_dashboard(stats)`** redraws the full `bext` terminal UI in-place via `bext.goto(0,0)` after every file processed. `stats` is a plain dict passed by reference throughout.
 - **Logging** overwrites `~/.dupehunter.log` on every run (`filemode='w'`). Logs at group/action granularity — not per-file during scan.
 
@@ -68,4 +71,4 @@ Both must be installed in whichever Python interpreter is active. With pyenv, mu
 
 ### Tests
 
-`test_dupehunter.py` covers `hash_file` and `find_duplicates` only — no CLI, no dashboard, no deletion. Uses only `pytest` and stdlib `tempfile`.
+`test_dupehunter.py` covers `hash_file`, `find_duplicates`, and `act_on_duplicates` (archive behaviour). No CLI or dashboard tested. Uses only `pytest`, stdlib `tempfile`, and `argparse.Namespace` for faking args.

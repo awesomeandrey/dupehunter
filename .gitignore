@@ -1,6 +1,10 @@
 .venv/
 __pycache__/
 .pytest_cache/
+.sfdx/
 *egg-info/
+build/
+dist/
+temp/
 
 *.pyc

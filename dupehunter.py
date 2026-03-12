@@ -6,6 +6,7 @@ import shutil
 import sys
 import time
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 
 import bext
@@ -18,7 +19,6 @@ logging.basicConfig(
     format='%(asctime)s %(levelname)s %(message)s',
 )
 
-
 def _fmt_elapsed(seconds: float) -> str:
     s = int(seconds)
     if s < 60:
@@ -26,7 +26,6 @@ def _fmt_elapsed(seconds: float) -> str:
     if s < 3600:
         return f'{s // 60}m {s % 60:02d}s'
     return f'{s // 3600}h {(s % 3600) // 60:02d}m'
-
 
 def hash_file(path: Path) -> str | None:
     h = hashlib.sha256()
@@ -40,7 +39,6 @@ def hash_file(path: Path) -> str | None:
     except (OSError, PermissionError) as e:
         logging.warning('Cannot read %s: %s', path, e)
         return None
-
 
 def collect_files(root: Path, exts: set[str]) -> tuple[list[Path], int]:
     candidates = []
@@ -59,7 +57,6 @@ def collect_files(root: Path, exts: set[str]) -> tuple[list[Path], int]:
             candidates.append(path)
     return candidates, folders
 
-
 def find_duplicates(
     files: list[Path | str],
     stats: dict | None = None,
@@ -70,7 +67,7 @@ def find_duplicates(
     for path in files:
         try:
             size_map[path.stat().st_size].append(path)
-        except OSError:
+        except (OSError, PermissionError):
             continue
 
     to_hash = [p for paths in size_map.values() if len(paths) > 1 for p in paths]
@@ -105,7 +102,6 @@ def find_duplicates(
                 draw_fn(stats)
 
     return {d: p for d, p in hash_map.items() if len(p) > 1}
-
 
 def draw_dashboard(stats: dict) -> None:
     WIDTH = 46
@@ -181,32 +177,55 @@ def draw_dashboard(stats: dict) -> None:
     bext.fg('reset')
     sys.stdout.flush()
 
-
-def act_on_duplicates(dupe_groups: dict, args: argparse.Namespace, stats: dict, draw_fn=None) -> None:
+def _delete_duplicates(dupe_groups: dict, stats: dict, draw_fn=None) -> None:
     for digest, paths in dupe_groups.items():
         keeper, *dupes = sorted(paths)
         logging.info('Duplicate group %s: keeper=%s duplicates=%s', digest[:8], keeper, dupes)
         for dupe in dupes:
-            if args.delete:
-                try:
-                    send2trash.send2trash(str(dupe))
-                    logging.info('Trashed: %s', dupe)
-                    stats['actioned'] += 1
-                except Exception as e:
-                    logging.error('Failed to trash %s: %s', dupe, e)
-            elif args.archive:
-                dest = Path(args.archive) / dupe.name
-                if dest.exists():
-                    dest = dest.with_stem(f'{dest.stem}_{digest[:8]}')
-                try:
-                    shutil.move(str(dupe), dest)
-                    logging.info('Archived: %s -> %s', dupe, dest)
-                    stats['actioned'] += 1
-                except Exception as e:
-                    logging.error('Failed to archive %s: %s', dupe, e)
+            try:
+                send2trash.send2trash(str(dupe))
+                logging.info('Trashed: %s', dupe)
+                stats['actioned'] += 1
+            except Exception as e:
+                logging.error('Failed to trash %s: %s', dupe, e)
             if draw_fn:
                 draw_fn(stats)
 
+def _archive_duplicates(dupe_groups: dict, archive_root: Path, stats: dict, draw_fn=None) -> None:
+    for group_num, (digest, paths) in enumerate(dupe_groups.items(), start=1):
+        keeper, *dupes = sorted(paths)
+        logging.info('Duplicate group %s: keeper=%s duplicates=%s', digest[:8], keeper, dupes)
+
+        subfolder = archive_root / f'{group_num:03d}'
+        subfolder.mkdir(parents=True, exist_ok=True)
+
+        try:
+            shutil.copy2(str(keeper), subfolder / f'keeper_{keeper.name}')
+            logging.info('Copied keeper: %s -> %s', keeper, subfolder / f'keeper_{keeper.name}')
+        except Exception as e:
+            logging.error('Failed to copy keeper %s: %s', keeper, e)
+
+        for dupe in dupes:
+            try:
+                shutil.move(str(dupe), subfolder / dupe.name)
+                logging.info('Archived: %s -> %s', dupe, subfolder / dupe.name)
+                stats['actioned'] += 1
+            except Exception as e:
+                logging.error('Failed to archive %s: %s', dupe, e)
+            if draw_fn:
+                draw_fn(stats)
+
+def act_on_duplicates(
+    dupe_groups: dict,
+    args: argparse.Namespace,
+    stats: dict,
+    draw_fn=None,
+    archive_root: Path | None = None,
+) -> None:
+    if args.delete:
+        _delete_duplicates(dupe_groups, stats, draw_fn)
+    elif args.archive and archive_root is not None:
+        _archive_duplicates(dupe_groups, archive_root, stats, draw_fn)
 
 def main():
     parser = argparse.ArgumentParser(prog='dupehunter')
@@ -215,8 +234,8 @@ def main():
                         required=True, metavar='EXT', help='File extension (repeatable)')
     parser.add_argument('--delete', action='store_true', default=False,
                         help='Send duplicates to trash')
-    parser.add_argument('--archive', default=None, metavar='DEST',
-                        help='Move duplicates to this folder')
+    parser.add_argument('--archive', nargs='?', const='AUTO', default=None, metavar='DEST',
+                        help='Move duplicates into an archive folder; omit value to auto-create inside --path')
     args = parser.parse_args()
 
     if args.delete and args.archive:
@@ -229,21 +248,26 @@ def main():
 
     allowed_exts = {ext.lstrip('.').lower() for ext in args.file_types}
 
+    archive_root: Path | None = None
     if args.archive:
-        archive_path = Path(args.archive)
+        if args.archive == 'AUTO':
+            timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+            archive_root = root / f'dupehunter-archive-{timestamp}'
+        else:
+            archive_root = Path(args.archive)
         try:
-            archive_path.mkdir(parents=True, exist_ok=True)
-            probe = archive_path / '.dupehunter_write_test'
+            archive_root.mkdir(parents=True, exist_ok=True)
+            probe = archive_root / '.dupehunter_write_test'
             probe.touch()
             probe.unlink()
         except Exception as e:
-            print(f"Error: archive destination '{args.archive}' is not writable: {e}", file=sys.stderr)
+            print(f"Error: archive destination '{archive_root}' is not writable: {e}", file=sys.stderr)
             sys.exit(1)
 
     if args.delete:
         mode_str, action_label = 'DELETE → Trash', 'Deleted:'
     elif args.archive:
-        mode_str, action_label = f'ARCHIVE → {args.archive}', 'Archived:'
+        mode_str, action_label = f'ARCHIVE → {archive_root}', 'Archived:'
     else:
         mode_str, action_label = 'SCAN ONLY', 'Scanned (no action):'
 
@@ -290,7 +314,7 @@ def main():
         for digest, paths in dupe_groups.items():
             logging.info('Found duplicate group %s: %s', digest[:8], paths)
 
-        act_on_duplicates(dupe_groups, args, stats, draw_fn=draw_dashboard)
+        act_on_duplicates(dupe_groups, args, stats, draw_fn=draw_dashboard, archive_root=archive_root)
 
         stats['current_file'] = ''
         draw_dashboard(stats)
@@ -311,7 +335,6 @@ def main():
         bext.fg('reset')
     finally:
         bext.show_cursor()
-
 
 if __name__ == '__main__':
     main()
