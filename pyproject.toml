@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "dupehunter"
+version = "1.0.0"
+requires-python = ">=3.10"
+dependencies = [
+    "send2trash",
+    "bext",
+]
+
+[project.scripts]
+dupehunter = "dupehunter:main"
