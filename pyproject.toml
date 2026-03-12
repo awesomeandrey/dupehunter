@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "dupehunter"
@@ -10,6 +10,9 @@ dependencies = [
     "send2trash",
     "bext",
 ]
+
+[tool.setuptools]
+py-modules = ["dupehunter"]
 
 [project.scripts]
 dupehunter = "dupehunter:main"

@@ -10,7 +10,7 @@ python -m venv .venv
 source .venv/bin/activate  # on Windows: .venv\Scripts\activate
 
 # Install the package and its dependencies
-pip install -e .
+python -m pip install -e .
 ```
 
 ## Usage
@@ -43,7 +43,7 @@ dupehunter --path ~/Downloads --file-type mp4 --file-type mov --archive ~/dupes
 ## Running Tests
 
 ```bash
-pytest test_dupehunter.py -v
+python -m pytest test_dupehunter.py -v
 ```
 
 ## Logs
