@@ -23,11 +23,11 @@ dupehunter -p "$(pwd)" -f jpg -f jpeg -f heic -f png -f mp4 -f mov
 # Delete duplicates (sent to OS trash)
 dupehunter -p ./documents -f pdf --delete
 
-# Archive duplicates to a folder
+# Archive duplicates to a specific folder
 dupehunter -p /media/drive -f jpg -f cr2 --archive /tmp/dupes
 
-# Multiple extensions
-dupehunter --path ~/Downloads --file-type mp4 --file-type mov --archive ~/dupes
+# Archive duplicates to an auto-generated folder inside --path
+dupehunter -p ~/Photos -f jpg -f heic --archive
 ```
 
 ### Arguments
@@ -37,14 +37,33 @@ dupehunter --path ~/Downloads --file-type mp4 --file-type mov --archive ~/dupes
 | `--path` | `-p` | Yes | Root folder to scan recursively |
 | `--file-type` | `-f` | Yes | File extension filter, repeatable |
 | `--delete` | — | No | Send duplicates to OS trash |
-| `--archive` | — | No | Move duplicates into this destination folder |
+| `--archive [DEST]` | — | No | Archive duplicates; omit `DEST` to auto-create folder inside `--path` |
 
 `--delete` and `--archive` are mutually exclusive.
+
+### Archive folder structure
+
+When `--archive` is used, each duplicate group gets its own numbered subfolder. The keeper file is copied in with a `keeper_` prefix; all duplicate files are moved in as-is.
+
+```
+dupehunter-archive-20260313-143022/
+├── 001/
+│   ├── keeper_photo.jpg   ← copy of the kept file (original untouched)
+│   └── photo_copy.jpg     ← duplicate moved here
+├── 002/
+│   ├── keeper_video.mp4
+│   └── video_backup.mp4
+```
+
+Auto-generated archive folder names follow the pattern `dupehunter-archive-YYYYMMDD-HHMMSS` and are created inside the scanned `--path`.
 
 ## Running Tests
 
 ```bash
-python -m pytest test_dupehunter.py -v
+pytest test_dupehunter.py -v
+
+# Single test
+pytest test_dupehunter.py::test_archive_keeper_copied_with_prefix_and_original_untouched -v
 ```
 
 ## Logs
