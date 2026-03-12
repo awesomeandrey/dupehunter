@@ -18,6 +18,7 @@ python -m pip install -e .
 ```bash
 # Scan only (no action taken)
 dupehunter -p ./photos -f jpg -f png
+dupehunter -p "$(pwd)" -f jpg -f jpeg -f heic -f png -f mp4 -f mov
 
 # Delete duplicates (sent to OS trash)
 dupehunter -p ./documents -f pdf --delete

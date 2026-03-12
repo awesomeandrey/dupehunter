@@ -4,6 +4,7 @@ import logging
 import os
 import shutil
 import sys
+import time
 from collections import defaultdict
 from pathlib import Path
 
@@ -16,6 +17,15 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s %(levelname)s %(message)s',
 )
+
+
+def _fmt_elapsed(seconds: float) -> str:
+    s = int(seconds)
+    if s < 60:
+        return f'{s}s'
+    if s < 3600:
+        return f'{s // 60}m {s % 60:02d}s'
+    return f'{s // 3600}h {(s % 3600) // 60:02d}m'
 
 
 def hash_file(path: Path) -> str | None:
@@ -137,6 +147,8 @@ def draw_dashboard(stats: dict) -> None:
     row('Mode:    ', stats.get('mode', 'SCAN ONLY'), 'magenta')
     divider()
 
+    elapsed = _fmt_elapsed(time.monotonic() - stats.get('start_time', time.monotonic()))
+    row('Elapsed:', elapsed)
     row('Folders visited:', f"{stats.get('folders', 0):,}")
     row('Files scanned:', f"{stats.get('scanned', 0):,}")
 
@@ -243,6 +255,7 @@ def main():
         'types': sorted(allowed_exts),
         'mode': mode_str,
         'action_label': action_label,
+        'start_time': time.monotonic(),
         'folders': 0,
         'scanned': 0,
         'current_file': '',
@@ -286,6 +299,14 @@ def main():
                      stats['folders'], stats['scanned'], stats['dupe_groups'],
                      stats['dupe_files'], stats['actioned'])
 
+        bext.goto(0, 20)
+        bext.fg('reset')
+    except KeyboardInterrupt:
+        stats['current_file'] = 'Interrupted'
+        stats['mode'] = stats['mode'] + '  [INTERRUPTED]'
+        draw_dashboard(stats)
+        logging.warning('Interrupted by user. folders=%d scanned=%d actioned=%d',
+                        stats['folders'], stats['scanned'], stats['actioned'])
         bext.goto(0, 20)
         bext.fg('reset')
     finally:
