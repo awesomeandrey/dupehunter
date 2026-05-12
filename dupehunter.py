@@ -43,7 +43,10 @@ def hash_file(path: Path) -> str | None:
 def collect_files(root: Path, exts: set[str]) -> tuple[list[Path], int]:
     candidates = []
     folders = 0
-    for dirpath, _, filenames in os.walk(root):
+    for dirpath, dirnames, filenames in os.walk(root):
+        # Mutating `dirnames`` in-place controls which subdirectories os.walk visits next and in what order.
+        # This works because os.walk uses that same list to decide what to recurse into.
+        dirnames.sort()
         folders += 1
         for name in filenames:
             path = Path(dirpath) / name
